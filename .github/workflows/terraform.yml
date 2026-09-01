@@ -1,0 +1,27 @@
+name: Kubernetes Infrastructure CI/CD
+
+on:
+  push:
+    branches: [fase-3, homolog, main]
+  pull_request:
+    branches: [fase-3, homolog, main]
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+      - name: Terraform plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -input=false
+      - name: Terraform apply
+        if: github.event_name == 'push' && (github.ref_name == 'homolog' || github.ref_name == 'main')
+        run: terraform apply -auto-approve -input=false
