@@ -4,3 +4,4 @@ terraform.tfstate
 terraform.tfstate.*
 *.tfvars
 crash.log
+.idea/
