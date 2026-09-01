@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  terraform:
+  terraform-validate:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -16,12 +16,48 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false
-      - run: terraform validate
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+      - name: Terraform validate
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  deploy:
+    if: github.event_name == 'push' && (github.ref_name == 'homolog' || github.ref_name == 'main')
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'homolog' }}
+    defaults:
+      run:
+        working-directory: terraform
+    env:
+      TF_ENV: ${{ github.ref_name == 'main' && 'prod' || 'hml' }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_environment: ${{ github.ref_name == 'main' && 'prod' || 'hml' }}
+      TF_VAR_cluster_name: ${{ secrets.EKS_CLUSTER_NAME }}
+      TF_VAR_vpc_id: ${{ secrets.VPC_ID }}
+      TF_VAR_private_subnet_ids: ${{ secrets.PRIVATE_SUBNET_IDS_JSON }}
+      TF_VAR_public_subnet_ids: ${{ secrets.PUBLIC_SUBNET_IDS_JSON }}
+      TF_VAR_api_backend_listener_arn: ${{ secrets.API_BACKEND_LISTENER_ARN }}
+      TF_VAR_auth_lambda_invoke_arn: ${{ secrets.AUTH_LAMBDA_INVOKE_ARN }}
+      TF_VAR_auth_lambda_function_name: ${{ secrets.AUTH_LAMBDA_FUNCTION_NAME }}
+      TF_VAR_new_relic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
       - name: Terraform plan
-        if: github.event_name == 'pull_request'
-        run: terraform plan -input=false
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=autocarehub-k8s/${{ env.TF_ENV }}/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}"
+          terraform plan -input=false
       - name: Terraform apply
-        if: github.event_name == 'push' && (github.ref_name == 'homolog' || github.ref_name == 'main')
         run: terraform apply -auto-approve -input=false
